@@ -1,0 +1,9 @@
+{
+  "name": "do-control-panel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DigitalOcean droplets control panel",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

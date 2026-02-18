@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DO 控制面板</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <h1>DigitalOcean 控制面板</h1>
+        <span class="badge">Cloud Ops</span>
+      </div>
+    </header>
+
+    <main class="container page">
+      <section class="stats-grid">
+        <article class="stat-card">
+          <p class="stat-label">总机器数</p>
+          <p id="statTotal" class="stat-value">0</p>
+        </article>
+        <article class="stat-card">
+          <p class="stat-label">运行中</p>
+          <p id="statActive" class="stat-value">0</p>
+        </article>
+        <article class="stat-card">
+          <p class="stat-label">非运行状态</p>
+          <p id="statInactive" class="stat-value">0</p>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>创建机器</h2>
+          <p class="subtle">默认：Atlanta · 2GB / 2 Intel vCPU · Ubuntu x64</p>
+        </div>
+        <form id="createForm" class="form-grid">
+          <label>
+            名称
+            <input id="createName" name="name" type="text" placeholder="例如 web-prod-1" required />
+          </label>
+          <label>
+            Region（可选）
+            <input id="createRegion" name="region" type="text" placeholder="默认自动 Atlanta" />
+          </label>
+          <label>
+            Size（可选）
+            <input id="createSize" name="size" type="text" placeholder="默认自动 2GB/2vCPU Intel" />
+          </label>
+          <label>
+            Image（可选）
+            <input id="createImage" name="image" type="text" placeholder="默认自动 Ubuntu x64" />
+          </label>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">创建机器</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="table-head">
+          <h2>当前机器</h2>
+          <button id="refreshBtn" class="btn btn-secondary" type="button">刷新列表</button>
+        </div>
+        <p id="status" class="status"></p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>名称</th>
+                <th>状态</th>
+                <th>公网 IP</th>
+                <th>Region</th>
+                <th>Size</th>
+                <th>Image</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="dropletTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
