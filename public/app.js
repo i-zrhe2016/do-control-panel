@@ -2,9 +2,13 @@ const createForm = document.getElementById('createForm');
 const tableBody = document.getElementById('dropletTableBody');
 const statusEl = document.getElementById('status');
 const refreshBtn = document.getElementById('refreshBtn');
+const tagFilterEl = document.getElementById('tagFilter');
+const deleteByTagBtn = document.getElementById('deleteByTagBtn');
 const statTotal = document.getElementById('statTotal');
 const statActive = document.getElementById('statActive');
 const statInactive = document.getElementById('statInactive');
+const ALL_TAG_FILTER = '__all__';
+let allDroplets = [];
 
 function setStatus(message, type = 'ok') {
   statusEl.textContent = message;
@@ -31,6 +35,14 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+function parseTagsInput(value) {
+  const parts = String(value || '').split(/[,\n，]/);
+  const tags = parts
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+  return Array.from(new Set(tags));
+}
+
 function renderStats(droplets) {
   const total = droplets.length;
   const active = droplets.filter((d) => String(d.status || '').toLowerCase() === 'active').length;
@@ -47,11 +59,69 @@ function statusPill(status) {
   return `<span class="status-pill${active ? ' active' : ''}">${text}</span>`;
 }
 
+function collectTags(droplets) {
+  const tagSet = new Set();
+  for (const droplet of droplets) {
+    const tags = Array.isArray(droplet.tags) ? droplet.tags : [];
+    for (const tag of tags) {
+      if (tag) tagSet.add(String(tag));
+    }
+  }
+  return Array.from(tagSet).sort((a, b) => a.localeCompare(b));
+}
+
+function getSelectedTag() {
+  return tagFilterEl.value || ALL_TAG_FILTER;
+}
+
+function filterBySelectedTag(droplets) {
+  const selectedTag = getSelectedTag();
+  if (selectedTag === ALL_TAG_FILTER) {
+    return droplets;
+  }
+  return droplets.filter((d) => Array.isArray(d.tags) && d.tags.includes(selectedTag));
+}
+
+function renderTagFilter(tags) {
+  const current = getSelectedTag();
+  const options = [
+    `<option value="${ALL_TAG_FILTER}">全部标签</option>`,
+    ...tags.map((tag) => `<option value="${escapeHtml(tag)}">${escapeHtml(tag)}</option>`),
+  ];
+  tagFilterEl.innerHTML = options.join('');
+
+  if (current === ALL_TAG_FILTER || tags.includes(current)) {
+    tagFilterEl.value = current;
+  } else {
+    tagFilterEl.value = ALL_TAG_FILTER;
+  }
+}
+
+function updateDeleteByTagButton(filteredCount) {
+  const selectedTag = getSelectedTag();
+  const disabled = selectedTag === ALL_TAG_FILTER || filteredCount === 0;
+  deleteByTagBtn.disabled = disabled;
+
+  if (selectedTag === ALL_TAG_FILTER) {
+    deleteByTagBtn.textContent = '删除当前标签机器';
+    return;
+  }
+
+  deleteByTagBtn.textContent = `删除标签(${filteredCount})`;
+}
+
+function renderCurrentList() {
+  const filteredDroplets = filterBySelectedTag(allDroplets);
+  renderRows(filteredDroplets);
+  updateDeleteByTagButton(filteredDroplets.length);
+  return filteredDroplets;
+}
+
 function renderRows(droplets) {
   renderStats(droplets);
 
   if (!droplets.length) {
-    tableBody.innerHTML = '<tr><td colspan="8">暂无机器</td></tr>';
+    tableBody.innerHTML = '<tr><td colspan="9">暂无机器</td></tr>';
     return;
   }
 
@@ -68,8 +138,12 @@ function renderRows(droplets) {
         <td>${escapeHtml(d.region || '-')}</td>
         <td>${escapeHtml(d.size || '-')}</td>
         <td>${escapeHtml(d.image || '-')}</td>
+        <td>
+          <input data-tags-id="${d.id}" value="${escapeHtml((Array.isArray(d.tags) ? d.tags : []).join(', '))}" />
+        </td>
         <td class="actions">
           <button data-action="rename" data-id="${d.id}" class="btn btn-secondary">重命名</button>
+          <button data-action="tags" data-id="${d.id}" class="btn btn-secondary">保存标签</button>
           <button data-action="rebuild" data-id="${d.id}" class="btn btn-warning">重装系统</button>
           <button data-action="delete" data-id="${d.id}" class="danger btn">删除</button>
         </td>
@@ -82,9 +156,16 @@ async function loadDroplets() {
   try {
     setStatus('加载中...', 'loading');
     const data = await fetchJson('/api/droplets');
-    const droplets = data.droplets || [];
-    renderRows(droplets);
-    setStatus(`已加载 ${droplets.length} 台机器`);
+    allDroplets = data.droplets || [];
+    renderTagFilter(collectTags(allDroplets));
+    const filteredDroplets = renderCurrentList();
+    const selectedTag = getSelectedTag();
+
+    if (selectedTag === ALL_TAG_FILTER) {
+      setStatus(`已加载 ${allDroplets.length} 台机器`);
+    } else {
+      setStatus(`已加载 ${allDroplets.length} 台机器，标签 ${selectedTag} 下 ${filteredDroplets.length} 台`);
+    }
   } catch (err) {
     setStatus(`加载失败: ${err.message}`, 'error');
   }
@@ -94,9 +175,7 @@ createForm.addEventListener('submit', async (event) => {
   event.preventDefault();
 
   const name = document.getElementById('createName').value.trim();
-  const region = document.getElementById('createRegion').value.trim();
-  const size = document.getElementById('createSize').value.trim();
-  const image = document.getElementById('createImage').value.trim();
+  const tags = parseTagsInput(document.getElementById('createTags').value);
 
   if (!name) {
     setStatus('创建失败: 名称不能为空', 'error');
@@ -110,9 +189,7 @@ createForm.addEventListener('submit', async (event) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name,
-        ...(region ? { region } : {}),
-        ...(size ? { size } : {}),
-        ...(image ? { image } : {}),
+        ...(tags.length > 0 ? { tags } : {}),
       }),
     });
 
@@ -126,6 +203,52 @@ createForm.addEventListener('submit', async (event) => {
 
 refreshBtn.addEventListener('click', () => {
   loadDroplets();
+});
+
+tagFilterEl.addEventListener('change', () => {
+  const filteredDroplets = renderCurrentList();
+  const selectedTag = getSelectedTag();
+  if (selectedTag === ALL_TAG_FILTER) {
+    setStatus(`已显示全部机器，共 ${filteredDroplets.length} 台`);
+    return;
+  }
+  setStatus(`已筛选标签 ${selectedTag}，共 ${filteredDroplets.length} 台`);
+});
+
+deleteByTagBtn.addEventListener('click', async () => {
+  const selectedTag = getSelectedTag();
+  const filteredDroplets = filterBySelectedTag(allDroplets);
+
+  if (selectedTag === ALL_TAG_FILTER) {
+    setStatus('请先选择一个标签', 'error');
+    return;
+  }
+
+  if (!filteredDroplets.length) {
+    setStatus(`标签 ${selectedTag} 下没有机器`, 'error');
+    return;
+  }
+
+  const ok = window.confirm(`确认删除标签 ${selectedTag} 下的 ${filteredDroplets.length} 台机器？此操作不可恢复。`);
+  if (!ok) return;
+
+  try {
+    setStatus(`批量删除中: 标签 ${selectedTag} ...`, 'loading');
+    const result = await fetchJson(`/api/droplets/by-tag/${encodeURIComponent(selectedTag)}`, {
+      method: 'DELETE',
+    });
+
+    const deleted = Number(result.deleted || 0);
+    const failed = Array.isArray(result.failed) ? result.failed.length : 0;
+    if (failed > 0) {
+      setStatus(`批量删除完成: 成功 ${deleted} 台，失败 ${failed} 台`, 'error');
+    } else {
+      setStatus(`批量删除完成: 已删除 ${deleted} 台`);
+    }
+    await loadDroplets();
+  } catch (err) {
+    setStatus(`批量删除失败: ${err.message}`, 'error');
+  }
 });
 
 tableBody.addEventListener('click', async (event) => {
@@ -174,25 +297,43 @@ tableBody.addEventListener('click', async (event) => {
     return;
   }
 
+  if (action === 'tags') {
+    const input = document.querySelector(`input[data-tags-id="${id}"]`);
+    const tags = parseTagsInput(input ? input.value : '');
+
+    try {
+      setStatus(`保存标签中: ${id} ...`, 'loading');
+      await fetchJson(`/api/droplets/${id}/tags`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags }),
+      });
+      setStatus(`标签已更新: ${id}`);
+      await loadDroplets();
+    } catch (err) {
+      setStatus(`标签更新失败: ${err.message}`, 'error');
+    }
+    return;
+  }
+
   if (action === 'rebuild') {
     const ok = window.confirm(`确认重装机器 ${id}？系统盘数据将被清空。`);
     if (!ok) return;
-
-    const image = window.prompt('输入镜像 slug（可留空默认 Ubuntu）', '');
 
     try {
       setStatus(`重装中: ${id} ...`, 'loading');
       await fetchJson(`/api/droplets/${id}/rebuild`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(image && image.trim() ? { image: image.trim() } : {}),
       });
       setStatus(`重装请求已提交: ${id}`);
       await loadDroplets();
     } catch (err) {
       setStatus(`重装失败: ${err.message}`, 'error');
     }
+    return;
   }
 });
 
+renderTagFilter([]);
+updateDeleteByTagButton(0);
 loadDroplets();

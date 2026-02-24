@@ -10,7 +10,6 @@
     <header class="topbar">
       <div class="container topbar-inner">
         <h1>DigitalOcean 控制面板</h1>
-        <span class="badge">Cloud Ops</span>
       </div>
     </header>
 
@@ -33,7 +32,7 @@
       <section class="panel">
         <div class="panel-head">
           <h2>创建机器</h2>
-          <p class="subtle">默认：Atlanta · 2GB / 2 Intel vCPU · Ubuntu x64</p>
+          <p class="subtle">固定：Singapore (sgp1) · 2 vCPU / 2GB (s-2vcpu-2gb) · Ubuntu 22.04</p>
         </div>
         <form id="createForm" class="form-grid">
           <label>
@@ -41,16 +40,8 @@
             <input id="createName" name="name" type="text" placeholder="例如 web-prod-1" required />
           </label>
           <label>
-            Region（可选）
-            <input id="createRegion" name="region" type="text" placeholder="默认自动 Atlanta" />
-          </label>
-          <label>
-            Size（可选）
-            <input id="createSize" name="size" type="text" placeholder="默认自动 2GB/2vCPU Intel" />
-          </label>
-          <label>
-            Image（可选）
-            <input id="createImage" name="image" type="text" placeholder="默认自动 Ubuntu x64" />
+            标签（逗号分隔）
+            <input id="createTags" name="tags" type="text" placeholder="例如 web,prod,api" />
           </label>
           <div class="form-actions">
             <button class="btn btn-primary" type="submit">创建机器</button>
@@ -61,7 +52,14 @@
       <section class="panel">
         <div class="table-head">
           <h2>当前机器</h2>
-          <button id="refreshBtn" class="btn btn-secondary" type="button">刷新列表</button>
+          <div class="table-tools">
+            <label class="filter-inline">
+              标签筛选
+              <select id="tagFilter"></select>
+            </label>
+            <button id="deleteByTagBtn" class="danger btn" type="button">删除当前标签机器</button>
+            <button id="refreshBtn" class="btn btn-secondary" type="button">刷新列表</button>
+          </div>
         </div>
         <p id="status" class="status"></p>
         <div class="table-wrap">
@@ -75,6 +73,7 @@
                 <th>Region</th>
                 <th>Size</th>
                 <th>Image</th>
+                <th>标签</th>
                 <th>操作</th>
               </tr>
             </thead>

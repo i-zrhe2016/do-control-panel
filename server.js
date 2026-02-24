@@ -7,6 +7,9 @@ const PORT = Number(process.env.PORT || 3000);
 const DO_API_TOKEN = process.env.DO_API_TOKEN || '';
 const DO_API_BASE = 'https://api.digitalocean.com/v2';
 const DO_DEFAULT_SSH_PUBLIC_KEY = (process.env.DO_DEFAULT_SSH_PUBLIC_KEY || '').trim();
+const FIXED_REGION = 'sgp1';
+const FIXED_SIZE = 's-2vcpu-2gb';
+const FIXED_IMAGE = 'ubuntu-22-04-x64';
 
 function sendJson(res, statusCode, data) {
   const body = JSON.stringify(data);
@@ -86,78 +89,6 @@ async function doApi(pathname, options = {}) {
   return json;
 }
 
-async function resolveDefaultRegion() {
-  const data = await doApi('/regions?per_page=200');
-  const regions = data.regions || [];
-
-  const atlanta = regions.find((r) => {
-    const slug = String(r.slug || '').toLowerCase();
-    const name = String(r.name || '').toLowerCase();
-    return r.available && (slug.includes('atl') || name.includes('atlanta'));
-  });
-  if (atlanta) return atlanta.slug;
-
-  const nyc = regions.find((r) => r.available && String(r.slug || '').startsWith('nyc'));
-  if (nyc) return nyc.slug;
-
-  const fallback = regions.find((r) => r.available);
-  if (fallback) return fallback.slug;
-
-  throw new Error('No available region found');
-}
-
-async function resolveDefaultSize(regionSlug) {
-  const data = await doApi('/sizes?per_page=200');
-  const sizes = data.sizes || [];
-
-  const exactIntel = sizes.find((s) => {
-    const slug = String(s.slug || '').toLowerCase();
-    const inRegion = Array.isArray(s.regions) ? s.regions.includes(regionSlug) : true;
-    return inRegion && s.available && s.memory === 2048 && s.vcpus === 2 && slug.includes('intel');
-  });
-  if (exactIntel) return exactIntel.slug;
-
-  const exactAny = sizes.find((s) => {
-    const inRegion = Array.isArray(s.regions) ? s.regions.includes(regionSlug) : true;
-    return inRegion && s.available && s.memory === 2048 && s.vcpus === 2;
-  });
-  if (exactAny) return exactAny.slug;
-
-  const fallback = sizes.find((s) => {
-    const inRegion = Array.isArray(s.regions) ? s.regions.includes(regionSlug) : true;
-    return inRegion && s.available;
-  });
-  if (fallback) return fallback.slug;
-
-  throw new Error('No available size found');
-}
-
-function ubuntuScore(image) {
-  const slug = String(image.slug || '').toLowerCase();
-  const match = slug.match(/ubuntu-(\d+)-(\d+)-x64/);
-  if (!match) return -1;
-  const major = Number(match[1]);
-  const minor = Number(match[2]);
-  return major * 100 + minor;
-}
-
-async function resolveDefaultImage() {
-  const data = await doApi('/images?type=distribution&per_page=200');
-  const images = data.images || [];
-
-  const ubuntu = images
-    .filter((img) => {
-      const dist = String(img.distribution || '').toLowerCase();
-      const slug = String(img.slug || '').toLowerCase();
-      return img.public && dist === 'ubuntu' && slug.includes('ubuntu-') && slug.endsWith('-x64');
-    })
-    .sort((a, b) => ubuntuScore(b) - ubuntuScore(a));
-
-  if (ubuntu.length > 0 && ubuntu[0].slug) return ubuntu[0].slug;
-
-  throw new Error('No Ubuntu image found');
-}
-
 function dropletToView(d) {
   const v4 = (d.networks && Array.isArray(d.networks.v4)) ? d.networks.v4 : [];
   const publicIp = v4.find((n) => n.type === 'public')?.ip_address || null;
@@ -169,6 +100,7 @@ function dropletToView(d) {
     region: d.region?.slug || null,
     size: d.size_slug || d.size?.slug || null,
     image: d.image?.slug || d.image?.name || null,
+    tags: Array.isArray(d.tags) ? d.tags : [],
     publicIp,
     createdAt: d.created_at || null,
   };
@@ -185,6 +117,33 @@ async function listDroplets() {
     page += 1;
   }
   return all;
+}
+
+async function deleteDropletsByTag(tagName) {
+  const droplets = await listDroplets();
+  const targets = droplets.filter((d) => Array.isArray(d.tags) && d.tags.includes(tagName));
+  const deletedIds = [];
+  const failed = [];
+
+  for (const droplet of targets) {
+    try {
+      await doApi(`/droplets/${droplet.id}`, { method: 'DELETE' });
+      deletedIds.push(droplet.id);
+    } catch (err) {
+      failed.push({
+        id: droplet.id,
+        error: err.message || 'Delete failed',
+      });
+    }
+  }
+
+  return {
+    tag: tagName,
+    matched: targets.length,
+    deleted: deletedIds.length,
+    deletedIds,
+    failed,
+  };
 }
 
 async function listSshKeys() {
@@ -248,6 +207,69 @@ function sanitizeName(name) {
   return safe;
 }
 
+function normalizeTags(tagsValue) {
+  const source = Array.isArray(tagsValue)
+    ? tagsValue
+    : String(tagsValue || '').split(/[,\n，]/);
+
+  const normalized = source
+    .map((tag) => String(tag || '').trim())
+    .filter(Boolean);
+
+  return Array.from(new Set(normalized));
+}
+
+async function getDropletTags(dropletId) {
+  const data = await doApi(`/droplets/${dropletId}`);
+  const tags = data?.droplet?.tags;
+  return normalizeTags(tags);
+}
+
+function tagResourcePayload(dropletId) {
+  return {
+    resources: [
+      {
+        resource_id: String(dropletId),
+        resource_type: 'droplet',
+      },
+    ],
+  };
+}
+
+async function addTagToDroplet(tagName, dropletId) {
+  try {
+    await doApi(`/tags/${encodeURIComponent(tagName)}/resources`, {
+      method: 'POST',
+      body: tagResourcePayload(dropletId),
+    });
+  } catch (err) {
+    if (err.status !== 404) {
+      throw err;
+    }
+
+    await doApi('/tags', {
+      method: 'POST',
+      body: { name: tagName },
+    }).catch((createErr) => {
+      if (createErr.status !== 422) {
+        throw createErr;
+      }
+    });
+
+    await doApi(`/tags/${encodeURIComponent(tagName)}/resources`, {
+      method: 'POST',
+      body: tagResourcePayload(dropletId),
+    });
+  }
+}
+
+async function removeTagFromDroplet(tagName, dropletId) {
+  await doApi(`/tags/${encodeURIComponent(tagName)}/resources`, {
+    method: 'DELETE',
+    body: tagResourcePayload(dropletId),
+  });
+}
+
 async function handleApi(req, res, urlObj) {
   if (!DO_API_TOKEN) {
     sendJson(res, 500, { error: 'Missing DO_API_TOKEN environment variable' });
@@ -269,19 +291,21 @@ async function handleApi(req, res, urlObj) {
     if (req.method === 'POST' && urlObj.pathname === '/api/droplets') {
       const body = await parseBody(req);
 
-      const region = body.region ? String(body.region) : await resolveDefaultRegion();
-      const size = body.size ? String(body.size) : await resolveDefaultSize(region);
-      const image = body.image ? String(body.image) : await resolveDefaultImage();
       const name = sanitizeName(body.name || `do-${Date.now()}`);
+      const tags = normalizeTags(body.tags);
       const requestedFingerprint = String(body.sshKeyFingerprint || '').trim();
       const defaultFingerprint = requestedFingerprint ? null : await ensureDefaultSshKeyFingerprint();
 
       const payload = {
         name,
-        region,
-        size,
-        image,
+        region: FIXED_REGION,
+        size: FIXED_SIZE,
+        image: FIXED_IMAGE,
       };
+
+      if (tags.length > 0) {
+        payload.tags = tags;
+      }
 
       if (requestedFingerprint || defaultFingerprint) {
         payload.ssh_keys = [requestedFingerprint || defaultFingerprint];
@@ -290,11 +314,10 @@ async function handleApi(req, res, urlObj) {
       const data = await doApi('/droplets', { method: 'POST', body: payload });
       sendJson(res, 201, {
         droplet: dropletToView(data.droplet || {}),
-        defaultsUsed: {
-          region: !body.region,
-          size: !body.size,
-          image: !body.image,
-          sshKey: !requestedFingerprint,
+        profile: {
+          region: FIXED_REGION,
+          size: FIXED_SIZE,
+          image: FIXED_IMAGE,
         },
       });
       return;
@@ -321,24 +344,50 @@ async function handleApi(req, res, urlObj) {
       return;
     }
 
+    if (req.method === 'PATCH' && /^\/api\/droplets\/\d+\/tags$/.test(urlObj.pathname)) {
+      const match = urlObj.pathname.match(/^\/api\/droplets\/(\d+)\/tags$/);
+      const dropletId = Number(match[1]);
+      const body = await parseBody(req);
+      const targetTags = normalizeTags(body.tags);
+      const currentTags = await getDropletTags(dropletId);
+
+      const tagsToAdd = targetTags.filter((tag) => !currentTags.includes(tag));
+      const tagsToRemove = currentTags.filter((tag) => !targetTags.includes(tag));
+
+      for (const tag of tagsToAdd) {
+        await addTagToDroplet(tag, dropletId);
+      }
+
+      for (const tag of tagsToRemove) {
+        await removeTagFromDroplet(tag, dropletId);
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        tags: targetTags,
+        added: tagsToAdd,
+        removed: tagsToRemove,
+      });
+      return;
+    }
+
     if (req.method === 'POST' && /^\/api\/droplets\/\d+\/rebuild$/.test(urlObj.pathname)) {
       const match = urlObj.pathname.match(/^\/api\/droplets\/(\d+)\/rebuild$/);
       const dropletId = Number(match[1]);
-      const body = await parseBody(req);
-      const image = body.image ? String(body.image).trim() : await resolveDefaultImage();
+      await parseBody(req);
 
       const action = await doApi(`/droplets/${dropletId}/actions`, {
         method: 'POST',
         body: {
           type: 'rebuild',
-          image,
+          image: FIXED_IMAGE,
         },
       });
 
       sendJson(res, 202, {
         action: action.action || null,
         message: 'Rebuild action submitted',
-        image,
+        image: FIXED_IMAGE,
       });
       return;
     }
@@ -348,6 +397,19 @@ async function handleApi(req, res, urlObj) {
       const dropletId = Number(match[1]);
       await doApi(`/droplets/${dropletId}`, { method: 'DELETE' });
       sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    if (req.method === 'DELETE' && /^\/api\/droplets\/by-tag\/[^/]+$/.test(urlObj.pathname)) {
+      const match = urlObj.pathname.match(/^\/api\/droplets\/by-tag\/([^/]+)$/);
+      const tagName = decodeURIComponent(match[1] || '').trim();
+      if (!tagName) {
+        sendJson(res, 400, { error: 'Tag is required' });
+        return;
+      }
+
+      const result = await deleteDropletsByTag(tagName);
+      sendJson(res, 200, result);
       return;
     }
 
