@@ -7,8 +7,14 @@ const deleteByTagBtn = document.getElementById('deleteByTagBtn');
 const statTotal = document.getElementById('statTotal');
 const statActive = document.getElementById('statActive');
 const statInactive = document.getElementById('statInactive');
+const statCredits = document.getElementById('statCredits');
+const statCreditsSub = document.getElementById('statCreditsSub');
+const statCreditsMeta = document.getElementById('statCreditsMeta');
 const ALL_TAG_FILTER = '__all__';
+const CREDITS_POLL_MS = 15_000;
 let allDroplets = [];
+let creditsPollTimer = null;
+let creditsLoading = false;
 
 function setStatus(message, type = 'ok') {
   statusEl.textContent = message;
@@ -41,6 +47,79 @@ function parseTagsInput(value) {
     .map((tag) => tag.trim())
     .filter(Boolean);
   return Array.from(new Set(tags));
+}
+
+function formatUsd(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) {
+    return '--';
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return '--';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '--';
+  }
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date);
+}
+
+function renderCredits(credits, options = {}) {
+  const { error = null, initial = false } = options;
+
+  if (initial) {
+    statCredits.textContent = '--';
+    statCreditsSub.textContent = '';
+    statCreditsSub.hidden = true;
+    statCreditsMeta.textContent = '每 15 秒自动刷新';
+    statCreditsMeta.classList.remove('error');
+    return;
+  }
+
+  if (error) {
+    statCredits.textContent = '--';
+    statCreditsSub.textContent = '';
+    statCreditsSub.hidden = true;
+    statCreditsMeta.textContent = `Available Credits 加载失败: ${error}`;
+    statCreditsMeta.classList.add('error');
+    return;
+  }
+
+  const availableCredits = Number(credits?.availableCredits);
+  if (!Number.isFinite(availableCredits)) {
+    statCredits.textContent = '--';
+    statCreditsSub.textContent = '';
+    statCreditsSub.hidden = true;
+    statCreditsMeta.textContent = 'DigitalOcean 当前未返回可解析的 credits 数据';
+    statCreditsMeta.classList.add('error');
+    return;
+  }
+
+  statCredits.textContent = formatUsd(availableCredits);
+  statCreditsSub.textContent = '';
+  statCreditsSub.hidden = true;
+  statCreditsMeta.textContent = `更新于 ${formatDateTime(credits?.generatedAt)} · 每 15 秒自动刷新`;
+  statCreditsMeta.classList.remove('error');
 }
 
 function renderStats(droplets) {
@@ -171,6 +250,46 @@ async function loadDroplets() {
   }
 }
 
+async function loadCredits(options = {}) {
+  const { silent = false } = options;
+
+  if (creditsLoading) {
+    return;
+  }
+
+  creditsLoading = true;
+  if (!silent) {
+    statCreditsMeta.textContent = 'Available Credits 加载中...';
+    statCreditsMeta.classList.remove('error');
+  }
+
+  try {
+    const data = await fetchJson('/api/credits');
+    renderCredits(data.credits || {});
+  } catch (err) {
+    renderCredits(null, { error: err.message });
+  } finally {
+    creditsLoading = false;
+  }
+}
+
+async function refreshAll() {
+  await Promise.all([
+    loadDroplets(),
+    loadCredits(),
+  ]);
+}
+
+function startCreditsPolling() {
+  if (creditsPollTimer) {
+    window.clearInterval(creditsPollTimer);
+  }
+
+  creditsPollTimer = window.setInterval(() => {
+    loadCredits({ silent: true });
+  }, CREDITS_POLL_MS);
+}
+
 createForm.addEventListener('submit', async (event) => {
   event.preventDefault();
 
@@ -202,7 +321,7 @@ createForm.addEventListener('submit', async (event) => {
 });
 
 refreshBtn.addEventListener('click', () => {
-  loadDroplets();
+  refreshAll();
 });
 
 tagFilterEl.addEventListener('change', () => {
@@ -336,4 +455,6 @@ tableBody.addEventListener('click', async (event) => {
 
 renderTagFilter([]);
 updateDeleteByTagButton(0);
-loadDroplets();
+renderCredits(null, { initial: true });
+refreshAll();
+startCreditsPolling();

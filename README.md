@@ -2,6 +2,7 @@
 
 支持通过 DigitalOcean API 管理 Droplet：
 - 查看当前机器
+- 查看 Available Credits（每 15 秒自动刷新）
 - 创建机器（支持命名）
 - 重命名机器
 - 重装系统
@@ -54,6 +55,9 @@ docker compose down
 ## API
 
 - `GET /api/droplets`：查询当前机器
+- `GET /api/credits`：查询 Available Credits
+- `Available Credits` 优先读取 DigitalOcean 直接返回的 credits 字段；若未提供，则按 GitHub Student Pack 默认 `$200` 和 invoice summary/preview 已抵扣 credits 估算
+- 可通过环境变量 `DO_STUDENT_PACK_INITIAL_CREDITS` 覆盖默认初始额度
 - `POST /api/droplets`：创建机器
   - body: `{ "name": "web-1", "region": "atl1?", "size": "s-2vcpu-2gb-intel?", "image": "ubuntu-24-04-x64?", "sshKeyFingerprint": "fingerprint?" }`
   - `region/size/image/sshKeyFingerprint` 可省略，省略时用默认自动解析

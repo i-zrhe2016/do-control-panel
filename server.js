@@ -10,6 +10,32 @@ const DO_DEFAULT_SSH_PUBLIC_KEY = (process.env.DO_DEFAULT_SSH_PUBLIC_KEY || '').
 const FIXED_REGION = 'sgp1';
 const FIXED_SIZE = 's-2vcpu-2gb';
 const FIXED_IMAGE = 'ubuntu-22-04-x64';
+const CREDITS_CACHE_TTL_MS = 15_000;
+const INVOICE_PAGE_SIZE = 100;
+const INVOICE_MAX_PAGES = 100;
+const STUDENT_PACK_INITIAL_CREDITS = numberOrDefault(process.env.DO_STUDENT_PACK_INITIAL_CREDITS, 200);
+const DIRECT_CREDITS_KEYS = [
+  'available_credits',
+  'availableCredits',
+  'credits_balance',
+  'creditsBalance',
+  'credit_balance',
+  'creditBalance',
+  'remaining_credits',
+  'remainingCredits',
+  'promo_credit_remaining',
+  'promoCreditRemaining',
+];
+
+let creditsCache = {
+  value: null,
+  expiresAt: 0,
+};
+
+function numberOrDefault(value, fallback) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
 
 function sendJson(res, statusCode, data) {
   const body = JSON.stringify(data);
@@ -117,6 +143,201 @@ async function listDroplets() {
     page += 1;
   }
   return all;
+}
+
+function numberOrNull(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function roundUsd(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function extractList(data, preferredKeys = []) {
+  if (Array.isArray(data)) {
+    return data;
+  }
+
+  for (const key of preferredKeys) {
+    if (Array.isArray(data?.[key])) {
+      return data[key];
+    }
+  }
+
+  for (const value of Object.values(data || {})) {
+    if (Array.isArray(value)) {
+      return value;
+    }
+  }
+
+  return [];
+}
+
+function parseDateOrNull(value) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
+}
+
+function latestTimestamp(a, b) {
+  const left = parseDateOrNull(a);
+  const right = parseDateOrNull(b);
+
+  if (!left) {
+    return right ? right.toISOString() : null;
+  }
+
+  if (!right) {
+    return left.toISOString();
+  }
+
+  return left >= right ? left.toISOString() : right.toISOString();
+}
+
+function pickDirectCreditsValue(data) {
+  for (const key of DIRECT_CREDITS_KEYS) {
+    const value = numberOrNull(data?.[key]);
+    if (value !== null) {
+      return { key, value };
+    }
+  }
+  return null;
+}
+
+async function listInvoices() {
+  const invoices = [];
+  let invoicePreview = null;
+  let page = 1;
+
+  while (page <= INVOICE_MAX_PAGES) {
+    const data = await doApi(`/customers/my/invoices?page=${page}&per_page=${INVOICE_PAGE_SIZE}`);
+    const pageInvoices = extractList(data, ['invoices']);
+    invoices.push(...pageInvoices);
+
+    if (!invoicePreview && data?.invoice_preview) {
+      invoicePreview = data.invoice_preview;
+    }
+
+    if (pageInvoices.length < INVOICE_PAGE_SIZE) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return {
+    invoices,
+    invoicePreview,
+  };
+}
+
+async function getInvoiceSummary(invoiceUuid) {
+  return doApi(`/customers/my/invoices/${invoiceUuid}/summary`);
+}
+
+async function getInvoicePreviewSummary() {
+  return doApi('/customers/my/invoices/preview/summary');
+}
+
+function getSummaryCreditsAmount(summary) {
+  const lineItemAmounts = Array.isArray(summary?.credits?.items)
+    ? summary.credits.items
+        .map((item) => numberOrNull(item?.amount))
+        .filter((value) => value !== null)
+    : [];
+
+  if (lineItemAmounts.length > 0) {
+    return roundUsd(lineItemAmounts.reduce((sum, value) => sum + Math.abs(value), 0));
+  }
+
+  const amount = numberOrNull(summary?.credits?.amount);
+  if (amount !== null) {
+    return roundUsd(Math.abs(amount));
+  }
+
+  return 0;
+}
+
+function summarizeCreditsFromInvoices(summaries, initialCredits) {
+  let consumedCredits = 0;
+  let generatedAt = null;
+
+  for (const summary of summaries) {
+    consumedCredits += getSummaryCreditsAmount(summary);
+    generatedAt = latestTimestamp(
+      generatedAt,
+      summary?.invoice_generated_at || summary?.updated_at || summary?.issue_date || null,
+    );
+  }
+
+  const roundedConsumed = roundUsd(consumedCredits);
+  return {
+    initialCredits: roundUsd(initialCredits),
+    consumedCredits: roundedConsumed,
+    availableCredits: roundUsd(Math.max(0, initialCredits - roundedConsumed)),
+    invoiceCount: summaries.length,
+    generatedAt,
+  };
+}
+
+async function getAvailableCredits() {
+  if (creditsCache.value && creditsCache.expiresAt > Date.now()) {
+    return creditsCache.value;
+  }
+
+  let balanceData = {};
+  try {
+    balanceData = await doApi('/customers/my/balance');
+  } catch {
+    balanceData = {};
+  }
+
+  const directCredits = pickDirectCreditsValue(balanceData);
+  let credits;
+
+  if (directCredits) {
+    credits = {
+      availableCredits: roundUsd(directCredits.value),
+      generatedAt: balanceData.generated_at || null,
+      source: 'balance_field',
+      exact: true,
+      note: `DigitalOcean balance response field: ${directCredits.key}`,
+    };
+  } else {
+    const { invoices } = await listInvoices();
+    const summaries = await Promise.all(
+      invoices
+        .map((invoice) => String(invoice?.invoice_uuid || '').trim())
+        .filter(Boolean)
+        .map((invoiceUuid) => getInvoiceSummary(invoiceUuid)),
+    );
+    const previewSummary = await getInvoicePreviewSummary().catch(() => null);
+    const allSummaries = previewSummary ? [...summaries, previewSummary] : summaries;
+    const summary = summarizeCreditsFromInvoices(allSummaries, STUDENT_PACK_INITIAL_CREDITS);
+
+    credits = {
+      ...summary,
+      generatedAt: summary.generatedAt || balanceData.generated_at || null,
+      source: 'invoice_summaries',
+      exact: false,
+      note: `Estimated from a $${roundUsd(STUDENT_PACK_INITIAL_CREDITS)} GitHub Student Pack using invoice summaries and the current invoice preview.`,
+    };
+  }
+
+  creditsCache = {
+    value: credits,
+    expiresAt: Date.now() + CREDITS_CACHE_TTL_MS,
+  };
+
+  return credits;
 }
 
 async function deleteDropletsByTag(tagName) {
@@ -285,6 +506,17 @@ async function handleApi(req, res, urlObj) {
     if (req.method === 'GET' && urlObj.pathname === '/api/droplets') {
       const droplets = await listDroplets();
       sendJson(res, 200, { droplets });
+      return;
+    }
+
+    if (req.method === 'GET' && urlObj.pathname === '/api/credits') {
+      const credits = await getAvailableCredits();
+      sendJson(res, 200, { credits });
+      return;
+    }
+
+    if (req.method === 'GET' && urlObj.pathname === '/api/balance') {
+      sendJson(res, 410, { error: 'Deprecated endpoint. Use /api/credits.' });
       return;
     }
 

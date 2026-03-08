@@ -67,6 +67,11 @@ h2 {
   padding: 12px 14px;
 }
 
+.stat-card-credits {
+  background: linear-gradient(180deg, #fffdf6 0%, #ffffff 100%);
+  border-color: #ead9a2;
+}
+
 .stat-label {
   margin: 0 0 6px;
   color: var(--muted);
@@ -77,6 +82,24 @@ h2 {
   margin: 0;
   font-size: 26px;
   font-weight: 700;
+}
+
+.stat-note,
+.stat-meta {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.stat-note {
+  color: var(--muted);
+}
+
+.stat-meta {
+  color: #7a5b00;
+}
+
+.stat-meta.error {
+  color: var(--danger);
 }
 
 .panel {
