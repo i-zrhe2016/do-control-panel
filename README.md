@@ -26,15 +26,7 @@ npm start
 
 浏览器访问 `http://localhost:3000`
 
-## 脚本
-
-```bash
-# 1) 通用 Git SSH 配置脚本
-scripts/setup_git_ssh.sh --host github.com --email your@email.com
-
-# 2) 通用 Git SSH 推送脚本
-scripts/push_git.sh --host github.com --repo i-zrhe2016/do-control-panel
-```
+Git 推送相关脚本已经从本项目拆出，放在上级目录的 `/root/git-tools`。
 
 ## Docker 启动
 
