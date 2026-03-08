@@ -26,6 +26,16 @@ npm start
 
 浏览器访问 `http://localhost:3000`
 
+## 脚本
+
+```bash
+# 1) 通用 Git SSH 配置脚本
+scripts/setup_git_ssh.sh --host github.com --email your@email.com
+
+# 2) 通用 Git SSH 推送脚本
+scripts/push_git.sh --host github.com --repo i-zrhe2016/do-control-panel
+```
+
 ## Docker 启动
 
 1. 在项目根目录创建 `.env`（可直接复制 `.env.example`）并填写：
