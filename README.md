@@ -9,9 +9,9 @@
 - 删除机器
 
 默认创建参数：
-- Region: 优先 Atlanta（自动识别，可用时使用）
-- Size: 2 GB / 2 Intel CPUs（优先 intel slug）
-- OS: Ubuntu（自动选择最新可用 Ubuntu x64）
+- Region: 可选 `sfo3` / `sgp1` / `blr1`，默认 `sgp1`
+- Size: 1 GB / 1 vCPU (`s-1vcpu-1gb`)
+- OS: Ubuntu 22.04 (`ubuntu-22-04-x64`)
 - SSH Key: 默认使用 `DO_DEFAULT_SSH_PUBLIC_KEY`（若账户不存在会自动导入）
 
 ## 启动
@@ -61,11 +61,13 @@ docker compose down
 - `Available Credits` 优先读取 DigitalOcean 直接返回的 credits 字段；若未提供，则按 GitHub Student Pack 默认 `$200` 和 invoice summary/preview 已抵扣 credits 估算
 - 可通过环境变量 `DO_STUDENT_PACK_INITIAL_CREDITS` 覆盖默认初始额度
 - `POST /api/droplets`：创建机器
-  - body: `{ "name": "web-1", "region": "atl1?", "size": "s-2vcpu-2gb-intel?", "image": "ubuntu-24-04-x64?", "sshKeyFingerprint": "fingerprint?" }`
-  - `region/size/image/sshKeyFingerprint` 可省略，省略时用默认自动解析
+  - body: `{ "name": "web-1", "region": "sgp1", "tags": ["web"], "sshKeyFingerprint": "fingerprint?" }`
+  - `region` 只允许 `sfo3` / `sgp1` / `blr1`，省略时默认 `sgp1`
+  - 创建规格固定为 `s-1vcpu-1gb` / `ubuntu-22-04-x64`
+  - `sshKeyFingerprint` 可省略，省略时使用默认 SSH key
 - `PATCH /api/droplets/:id/rename`：重命名机器
   - body: `{ "name": "new-name" }`
 - `POST /api/droplets/:id/rebuild`：重装系统
-  - body: `{ "image": "ubuntu-24-04-x64?" }`
-  - `image` 可省略，省略时自动使用默认 Ubuntu 镜像
+  - body: `{}` 或空 body
+  - 重装镜像固定使用 `ubuntu-22-04-x64`
 - `DELETE /api/droplets/:id`：删除机器

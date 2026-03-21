@@ -7,8 +7,13 @@ const PORT = Number(process.env.PORT || 3000);
 const DO_API_TOKEN = process.env.DO_API_TOKEN || '';
 const DO_API_BASE = 'https://api.digitalocean.com/v2';
 const DO_DEFAULT_SSH_PUBLIC_KEY = (process.env.DO_DEFAULT_SSH_PUBLIC_KEY || '').trim();
-const FIXED_REGION = 'sgp1';
-const FIXED_SIZE = 's-2vcpu-2gb';
+const DEFAULT_REGION = 'sgp1';
+const ALLOWED_REGIONS = new Map([
+  ['sfo3', 'San Francisco'],
+  ['sgp1', 'Singapore'],
+  ['blr1', 'Bangalore'],
+]);
+const FIXED_SIZE = 's-1vcpu-1gb';
 const FIXED_IMAGE = 'ubuntu-22-04-x64';
 const CREDITS_CACHE_TTL_MS = 15_000;
 const INVOICE_PAGE_SIZE = 100;
@@ -440,6 +445,16 @@ function normalizeTags(tagsValue) {
   return Array.from(new Set(normalized));
 }
 
+function normalizeRegion(regionValue) {
+  const region = String(regionValue || DEFAULT_REGION).trim().toLowerCase();
+  if (!ALLOWED_REGIONS.has(region)) {
+    const err = new Error(`Unsupported region. Allowed regions: ${Array.from(ALLOWED_REGIONS.keys()).join(', ')}`);
+    err.status = 400;
+    throw err;
+  }
+  return region;
+}
+
 async function getDropletTags(dropletId) {
   const data = await doApi(`/droplets/${dropletId}`);
   const tags = data?.droplet?.tags;
@@ -525,12 +540,13 @@ async function handleApi(req, res, urlObj) {
 
       const name = sanitizeName(body.name || `do-${Date.now()}`);
       const tags = normalizeTags(body.tags);
+      const region = normalizeRegion(body.region);
       const requestedFingerprint = String(body.sshKeyFingerprint || '').trim();
       const defaultFingerprint = requestedFingerprint ? null : await ensureDefaultSshKeyFingerprint();
 
       const payload = {
         name,
-        region: FIXED_REGION,
+        region,
         size: FIXED_SIZE,
         image: FIXED_IMAGE,
       };
@@ -547,7 +563,7 @@ async function handleApi(req, res, urlObj) {
       sendJson(res, 201, {
         droplet: dropletToView(data.droplet || {}),
         profile: {
-          region: FIXED_REGION,
+          region,
           size: FIXED_SIZE,
           image: FIXED_IMAGE,
         },

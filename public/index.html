@@ -38,9 +38,17 @@
       <section class="panel">
         <div class="panel-head">
           <h2>创建机器</h2>
-          <p class="subtle">固定：Singapore (sgp1) · 2 vCPU / 2GB (s-2vcpu-2gb) · Ubuntu 22.04</p>
+          <p class="subtle">地区可选：San Francisco (sfo3) / Singapore (sgp1) / Bangalore (blr1) · 固定规格：1 vCPU / 1GB (s-1vcpu-1gb) · 25 GB SSD Disk · 1000 GB transfer · $6 /mo · $0.009 /hour · Ubuntu 22.04</p>
         </div>
         <form id="createForm" class="form-grid">
+          <label>
+            地区
+            <select id="createRegion" name="region">
+              <option value="sfo3">San Francisco (sfo3)</option>
+              <option value="sgp1" selected>Singapore (sgp1)</option>
+              <option value="blr1">Bangalore (blr1)</option>
+            </select>
+          </label>
           <label>
             名称
             <input id="createName" name="name" type="text" placeholder="例如 web-prod-1" required />

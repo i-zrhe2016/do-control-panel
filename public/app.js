@@ -293,6 +293,7 @@ function startCreditsPolling() {
 createForm.addEventListener('submit', async (event) => {
   event.preventDefault();
 
+  const region = document.getElementById('createRegion').value.trim();
   const name = document.getElementById('createName').value.trim();
   const tags = parseTagsInput(document.getElementById('createTags').value);
 
@@ -307,6 +308,7 @@ createForm.addEventListener('submit', async (event) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        region,
         name,
         ...(tags.length > 0 ? { tags } : {}),
       }),
