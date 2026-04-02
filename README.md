@@ -13,6 +13,12 @@
 默认创建参数：
 - Region: 可选 `sfo3` / `sgp1` / `blr1`，默认 `sgp1`
 - Size: 经典型号预置列表（可搜索），默认 `s-1vcpu-1gb`
+  - `$4/mo ($0.006/hour)`: `s-1vcpu-512mb-10gb` (512 MB / 1 CPU, 10 GB SSD, 500 GB transfer)
+  - `$6/mo ($0.009/hour)`: `s-1vcpu-1gb` (1 GB / 1 CPU, 25 GB SSD, 1000 GB transfer)
+  - `$12/mo ($0.018/hour)`: `s-1vcpu-2gb` (2 GB / 1 CPU, 50 GB SSD, 2 TB transfer)
+  - `$18/mo ($0.027/hour)`: `s-2vcpu-2gb` (2 GB / 2 CPUs, 60 GB SSD, 3 TB transfer)
+  - `$24/mo ($0.036/hour)`: `s-2vcpu-4gb` (4 GB / 2 CPUs, 80 GB SSD, 4 TB transfer)
+  - `$48/mo ($0.071/hour)`: `s-4vcpu-8gb` (8 GB / 4 CPUs, 160 GB SSD, 5 TB transfer)
 - OS: Ubuntu 22.04 (`ubuntu-22-04-x64`)
 - SSH Key: 默认使用 `DO_DEFAULT_SSH_PUBLIC_KEY`（若账户不存在会自动导入）
 

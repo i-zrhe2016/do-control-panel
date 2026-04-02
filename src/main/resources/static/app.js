@@ -95,28 +95,57 @@ function toNumberOrNull(value) {
 }
 
 function formatSizeLabel(size) {
+  const backendLabel = String(size?.label || '').trim();
+  if (backendLabel) {
+    return backendLabel;
+  }
+
   const slug = String(size?.slug || '');
   const vcpus = toNumberOrNull(size?.vcpus);
-  const memoryGb = toNumberOrNull(size?.memoryGb);
+  const memoryMb = toNumberOrNull(size?.memoryMb);
   const diskGb = toNumberOrNull(size?.diskGb);
   const transferTb = toNumberOrNull(size?.transferTb);
   const monthlyUsd = toNumberOrNull(size?.monthlyUsd);
+  const hourlyUsd = toNumberOrNull(size?.hourlyUsd);
 
-  const parts = [];
-  if (vcpus !== null && memoryGb !== null) {
-    parts.push(`${vcpus} vCPU / ${memoryGb}GB`);
+  let memoryText = '';
+  if (memoryMb !== null) {
+    if (memoryMb < 1024) {
+      memoryText = `${memoryMb} MB`;
+    } else if (memoryMb % 1024 === 0) {
+      memoryText = `${memoryMb / 1024} GB`;
+    } else {
+      memoryText = `${(memoryMb / 1024).toFixed(2)} GB`;
+    }
   }
-  if (diskGb !== null) {
-    parts.push(`${diskGb}GB SSD`);
-  }
+
+  const cpuText = vcpus === null ? '' : (vcpus === 1 ? '1 CPU' : `${vcpus} CPUs`);
+  const coreText = [memoryText, cpuText].filter(Boolean).join(' / ');
+  const diskText = diskGb === null ? '' : `${diskGb} GB SSD Disk`;
+
+  let transferText = '';
   if (transferTb !== null) {
-    parts.push(`${transferTb}TB transfer`);
-  }
-  if (monthlyUsd !== null) {
-    parts.push(`$${monthlyUsd}/mo`);
+    if (transferTb < 1) {
+      transferText = `${Math.round(transferTb * 1000)} GB transfer`;
+    } else if (Number.isInteger(transferTb)) {
+      transferText = `${transferTb} TB transfer`;
+    } else {
+      transferText = `${transferTb} TB transfer`;
+    }
   }
 
-  return [slug, ...parts].filter(Boolean).join(' · ');
+  let priceText = '';
+  if (monthlyUsd !== null && hourlyUsd !== null) {
+    priceText = `$${monthlyUsd}/mo ($${hourlyUsd}/hour)`;
+  } else if (monthlyUsd !== null) {
+    priceText = `$${monthlyUsd}/mo`;
+  }
+
+  const detailText = [coreText, diskText, transferText].filter(Boolean).join(', ');
+  if (priceText && detailText) {
+    return `${priceText}: ${detailText}`;
+  }
+  return [slug, detailText].filter(Boolean).join(' · ');
 }
 
 function renderSizeOptions(sizes, preferred = '') {

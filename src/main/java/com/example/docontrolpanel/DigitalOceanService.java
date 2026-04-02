@@ -49,6 +49,7 @@ public class DigitalOceanService {
       .thenComparingInt(SizeOption::memoryMb)
       .thenComparing(SizeOption::slug);
   private static final List<SizeOption> CLASSIC_SIZES = List.of(
+      new SizeOption("s-1vcpu-512mb-10gb", "Basic", 512, 1, 10, 0.5, 4.0, 0.006, true, CLASSIC_SIZE_REGIONS),
       new SizeOption("s-1vcpu-1gb", "Basic", 1024, 1, 25, 1.0, 6.0, 0.009, true, CLASSIC_SIZE_REGIONS),
       new SizeOption("s-1vcpu-2gb", "Basic", 2048, 1, 50, 2.0, 12.0, 0.018, true, CLASSIC_SIZE_REGIONS),
       new SizeOption("s-2vcpu-2gb", "Basic", 2048, 2, 60, 3.0, 18.0, 0.027, true, CLASSIC_SIZE_REGIONS),
@@ -986,10 +987,15 @@ public class DigitalOceanService {
           slug + " "
               + category + " "
               + memoryMb + "mb "
+              + memoryText() + " "
               + memoryGbDisplay() + "gb "
               + vcpus + "vcpu "
-              + "$" + monthlyUsd + " "
-              + "ssd " + diskGb + "gb"
+              + cpuText() + " "
+              + "$" + formatDecimal(monthlyUsd) + " "
+              + "$" + formatDecimal(hourlyUsd) + " "
+              + "ssd " + diskGb + "gb "
+              + transferTb + "tb "
+              + transferGbDisplay() + "gb transfer"
       ).toLowerCase(Locale.ROOT);
       return searchable.contains(keyword);
     }
@@ -1013,11 +1019,62 @@ public class DigitalOceanService {
     }
 
     private String label() {
-      return slug + " · " + vcpus + " vCPU / " + memoryGbDisplay() + "GB · $" + monthlyUsd + "/mo";
+      return priceText() + ": " + memoryText() + " / " + cpuText() + ", " + diskGb + " GB SSD Disk, " + transferText();
     }
 
     private double memoryGbDisplay() {
       return Math.round((memoryMb / 1024.0) * 100.0) / 100.0;
+    }
+
+    private String memoryText() {
+      if (memoryMb < 1024) {
+        return memoryMb + " MB";
+      }
+      if (memoryMb % 1024 == 0) {
+        return (memoryMb / 1024) + " GB";
+      }
+      return trimTrailingZeros(memoryGbDisplay()) + " GB";
+    }
+
+    private String cpuText() {
+      return vcpus == 1 ? "1 CPU" : vcpus + " CPUs";
+    }
+
+    private int transferGbDisplay() {
+      return (int) Math.round(transferTb * 1000.0);
+    }
+
+    private String transferText() {
+      if (transferTb < 1) {
+        return transferGbDisplay() + " GB transfer";
+      }
+      if (Math.abs(transferTb - Math.rint(transferTb)) < 0.00001) {
+        return ((int) Math.rint(transferTb)) + " TB transfer";
+      }
+      return trimTrailingZeros(transferTb) + " TB transfer";
+    }
+
+    private String priceText() {
+      return "$" + formatDecimal(monthlyUsd) + "/mo ($" + formatDecimal(hourlyUsd) + "/hour)";
+    }
+
+    private String formatDecimal(double value) {
+      return trimTrailingZeros(value);
+    }
+
+    private String trimTrailingZeros(double value) {
+      String text = String.format(Locale.ROOT, "%.4f", value);
+      int end = text.length();
+      while (end > 0 && text.charAt(end - 1) == '0') {
+        end -= 1;
+      }
+      if (end > 0 && text.charAt(end - 1) == '.') {
+        end -= 1;
+      }
+      if (end <= 0) {
+        return "0";
+      }
+      return text.substring(0, end);
     }
   }
 }
