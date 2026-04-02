@@ -175,7 +175,7 @@ function schedulePopularSizeSearch() {
     try {
       await loadPopularSizes(createSizeQueryEl.value);
     } catch (err) {
-      setStatus(`热门型号加载失败: ${err.message}`, 'error');
+      setStatus(`经典型号加载失败: ${err.message}`, 'error');
     }
   }, SIZE_SEARCH_DEBOUNCE_MS);
 }
@@ -447,7 +447,7 @@ createSizeQueryEl.addEventListener('input', () => {
 
 createRegionEl.addEventListener('change', () => {
   loadPopularSizes(createSizeQueryEl.value).catch((err) => {
-    setStatus(`热门型号加载失败: ${err.message}`, 'error');
+    setStatus(`经典型号加载失败: ${err.message}`, 'error');
   });
 });
 
@@ -574,7 +574,7 @@ renderTagFilter([]);
 updateDeleteByTagButton(0);
 renderCredits(null, { initial: true });
 loadPopularSizes().catch((err) => {
-  setStatus(`热门型号加载失败: ${err.message}`, 'error');
+  setStatus(`经典型号加载失败: ${err.message}`, 'error');
 });
 refreshAll();
 startCreditsPolling();

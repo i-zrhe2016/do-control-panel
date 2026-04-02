@@ -12,7 +12,7 @@
 
 默认创建参数：
 - Region: 可选 `sfo3` / `sgp1` / `blr1`，默认 `sgp1`
-- Size: 实时从 DO `/v2/sizes` 拉取并排序，仅展示学生包可创建型号，默认 `s-1vcpu-1gb`
+- Size: 经典型号预置列表（可搜索），默认 `s-1vcpu-1gb`
 - OS: Ubuntu 22.04 (`ubuntu-22-04-x64`)
 - SSH Key: 默认使用 `DO_DEFAULT_SSH_PUBLIC_KEY`（若账户不存在会自动导入）
 
@@ -65,11 +65,11 @@ Git 推送相关脚本已经从本项目拆出，放在上级目录的 `/root/gi
 - `GET /api/droplets`：查询当前机器
 - `GET /api/credits`：查询 Available Credits
 - `GET /api/balance`：已废弃（返回 410，提示使用 `/api/credits`）
-- `GET /api/sizes/popular?q=关键词&region=sgp1`：查询型号（实时拉取 DO `/v2/sizes`，按 region 过滤并自动排序，支持关键词过滤）
+- `GET /api/sizes/popular?q=关键词&region=sgp1`：查询经典型号（按 region 过滤，支持关键词过滤）
 - `POST /api/droplets`：创建机器
   - body: `{ "name": "web-1", "region": "sgp1", "size": "s-1vcpu-1gb", "tags": ["web"], "sshKeyFingerprint": "fingerprint?" }`
   - `region` 只允许 `sfo3` / `sgp1` / `blr1`，省略时默认 `sgp1`
-  - `size` 可选，若省略默认 `s-1vcpu-1gb`；仅允许 `/api/sizes/popular` 当前返回的 slug（学生包可创建）
+  - `size` 可选，若省略默认 `s-1vcpu-1gb`；仅允许经典型号列表返回的 slug
   - 镜像固定为 `ubuntu-22-04-x64`
   - `sshKeyFingerprint` 可省略，省略时使用默认 SSH key
 - `PATCH /api/droplets/:id/rename`：重命名机器

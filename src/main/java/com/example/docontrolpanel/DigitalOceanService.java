@@ -36,20 +36,25 @@ public class DigitalOceanService {
       "sgp1", "Singapore",
       "blr1", "Bangalore"
   );
+  private static final List<String> CLASSIC_SIZE_REGIONS = List.of("sfo3", "sgp1", "blr1");
   private static final String DEFAULT_SIZE = "s-1vcpu-1gb";
   private static final String FIXED_IMAGE = "ubuntu-22-04-x64";
-  private static final long SIZE_CACHE_TTL_MS = 30_000;
-  private static final int SIZE_PAGE_SIZE = 200;
-  private static final int SIZE_MAX_PAGES = 20;
   private static final long CREDITS_CACHE_TTL_MS = 15_000;
   private static final int INVOICE_PAGE_SIZE = 100;
   private static final int INVOICE_MAX_PAGES = 100;
-  private static final Comparator<SizeOption> SIZE_SORT_COMPARATOR = Comparator
+  private static final Comparator<SizeOption> CLASSIC_SIZE_SORT_COMPARATOR = Comparator
       .comparingInt((SizeOption size) -> DEFAULT_SIZE.equals(size.slug()) ? 0 : 1)
       .thenComparingDouble(SizeOption::monthlyUsd)
       .thenComparingInt(SizeOption::vcpus)
       .thenComparingInt(SizeOption::memoryMb)
       .thenComparing(SizeOption::slug);
+  private static final List<SizeOption> CLASSIC_SIZES = List.of(
+      new SizeOption("s-1vcpu-1gb", "Basic", 1024, 1, 25, 1.0, 6.0, 0.009, true, CLASSIC_SIZE_REGIONS),
+      new SizeOption("s-1vcpu-2gb", "Basic", 2048, 1, 50, 2.0, 12.0, 0.018, true, CLASSIC_SIZE_REGIONS),
+      new SizeOption("s-2vcpu-2gb", "Basic", 2048, 2, 60, 3.0, 18.0, 0.027, true, CLASSIC_SIZE_REGIONS),
+      new SizeOption("s-2vcpu-4gb", "Basic", 4096, 2, 80, 4.0, 24.0, 0.036, true, CLASSIC_SIZE_REGIONS),
+      new SizeOption("s-4vcpu-8gb", "Basic", 8192, 4, 160, 5.0, 48.0, 0.071, true, CLASSIC_SIZE_REGIONS)
+  );
 
   private static final List<String> DIRECT_CREDITS_KEYS = List.of(
       "available_credits",
@@ -71,7 +76,6 @@ public class DigitalOceanService {
   private final double studentPackInitialCredits;
 
   private volatile CreditsCache creditsCache = new CreditsCache(null, 0);
-  private volatile SizeCache sizeCache = new SizeCache(List.of(), 0);
 
   public DigitalOceanService(
       ObjectMapper objectMapper,
@@ -188,7 +192,7 @@ public class DigitalOceanService {
     String region = normalizeRegionOrDefault(regionValue);
     List<Map<String, Object>> result = new ArrayList<>();
 
-    for (SizeOption size : listStudentPackageSizes()) {
+    for (SizeOption size : listClassicSizes()) {
       if ((keyword.isEmpty() || size.matches(keyword)) && size.regions().contains(region)) {
         result.add(size.toView(DEFAULT_SIZE.equals(size.slug())));
       }
@@ -767,152 +771,10 @@ public class DigitalOceanService {
     return region;
   }
 
-  private synchronized List<SizeOption> listStudentPackageSizes() {
-    SizeCache currentCache = sizeCache;
-    long now = System.currentTimeMillis();
-
-    if (currentCache.value() != null && currentCache.expiresAt() > now) {
-      return currentCache.value();
-    }
-
-    try {
-      List<SizeOption> refreshed = fetchStudentPackageSizes();
-      List<SizeOption> immutable = List.copyOf(refreshed);
-      sizeCache = new SizeCache(immutable, now + SIZE_CACHE_TTL_MS);
-      return immutable;
-    } catch (Exception err) {
-      if (currentCache.value() != null && !currentCache.value().isEmpty()) {
-        return currentCache.value();
-      }
-      throw err;
-    }
-  }
-
-  private List<SizeOption> fetchStudentPackageSizes() {
-    List<SizeOption> all = fetchDoSizes();
-    List<SizeOption> filtered = new ArrayList<>();
-
-    for (SizeOption size : all) {
-      if (isStudentPackageSupported(size)) {
-        filtered.add(size);
-      }
-    }
-
-    filtered.sort(SIZE_SORT_COMPARATOR);
-    return filtered;
-  }
-
-  private List<SizeOption> fetchDoSizes() {
-    List<SizeOption> all = new ArrayList<>();
-    int page = 1;
-
-    while (page <= SIZE_MAX_PAGES) {
-      JsonNode data = doApi("/sizes?page=" + page + "&per_page=" + SIZE_PAGE_SIZE, "GET", null);
-      JsonNode sizes = data.path("sizes");
-      int count = 0;
-
-      if (sizes.isArray()) {
-        for (JsonNode sizeNode : sizes) {
-          SizeOption parsed = parseSizeOption(sizeNode);
-          if (parsed != null) {
-            all.add(parsed);
-          }
-          count += 1;
-        }
-      }
-
-      if (count < SIZE_PAGE_SIZE) {
-        break;
-      }
-
-      page += 1;
-    }
-
-    return all;
-  }
-
-  private SizeOption parseSizeOption(JsonNode sizeNode) {
-    String slug = trimToEmpty(textOrNull(sizeNode.get("slug"))).toLowerCase(Locale.ROOT);
-    if (slug.isEmpty()) {
-      return null;
-    }
-
-    String category = firstNonBlank(
-        textOrNull(sizeNode.get("description")),
-        inferCategoryFromSlug(slug),
-        "Unknown"
-    );
-
-    int memoryMb = numberToInt(sizeNode.get("memory"), 0);
-    int vcpus = numberToInt(sizeNode.get("vcpus"), 0);
-    int diskGb = numberToInt(sizeNode.get("disk"), 0);
-    Double transferRaw = numberOrNull(sizeNode.get("transfer"));
-    Double monthlyRaw = numberOrNull(sizeNode.get("price_monthly"));
-    Double hourlyRaw = numberOrNull(sizeNode.get("price_hourly"));
-    double transferTb = transferRaw == null ? 0 : round2(transferRaw);
-    double monthlyUsd = monthlyRaw == null ? 0 : round2(monthlyRaw);
-    double hourlyUsd = hourlyRaw == null ? 0 : round4(hourlyRaw);
-    boolean available = boolOrDefault(sizeNode.get("available"), false);
-    List<String> regions = normalizeTags(sizeNode.get("regions"));
-
-    return new SizeOption(
-        slug,
-        category,
-        memoryMb,
-        vcpus,
-        diskGb,
-        transferTb,
-        monthlyUsd,
-        hourlyUsd,
-        available,
-        regions
-    );
-  }
-
-  private boolean isStudentPackageSupported(SizeOption size) {
-    if (!size.available()) {
-      return false;
-    }
-
-    if (!size.slug().startsWith("s-")) {
-      return false;
-    }
-
-    if (size.slug().contains("-amd") || size.slug().contains("-intel")) {
-      return false;
-    }
-
-    if (size.monthlyUsd() <= 0) {
-      return false;
-    }
-
-    if (size.regions() == null || size.regions().isEmpty()) {
-      return false;
-    }
-
-    for (String allowedRegion : ALLOWED_REGIONS.keySet()) {
-      if (size.regions().contains(allowedRegion)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private String inferCategoryFromSlug(String slug) {
-    if (slug.startsWith("s-")) {
-      return "Basic";
-    }
-    if (slug.startsWith("c-")) {
-      return "CPU-Optimized";
-    }
-    if (slug.startsWith("g-")) {
-      return "General Purpose";
-    }
-    if (slug.startsWith("m-")) {
-      return "Memory-Optimized";
-    }
-    return "Other";
+  private List<SizeOption> listClassicSizes() {
+    List<SizeOption> sizes = new ArrayList<>(CLASSIC_SIZES);
+    sizes.sort(CLASSIC_SIZE_SORT_COMPARATOR);
+    return sizes;
   }
 
   private String normalizeSize(Object sizeValue, String region) {
@@ -922,7 +784,7 @@ public class DigitalOceanService {
     }
 
     boolean foundSlug = false;
-    List<SizeOption> allowedSizes = listStudentPackageSizes();
+    List<SizeOption> allowedSizes = listClassicSizes();
     for (SizeOption option : allowedSizes) {
       if (option.slug().equals(size)) {
         foundSlug = true;
@@ -943,7 +805,7 @@ public class DigitalOceanService {
 
     throw new ApiException(
         400,
-        "Unsupported size for this student package account. Use /api/sizes/popular to query available sizes.",
+        "Unsupported classic size. Use /api/sizes/popular to query allowed sizes.",
         null
     );
   }
@@ -1012,55 +874,12 @@ public class DigitalOceanService {
     return null;
   }
 
-  private int numberToInt(JsonNode node, int fallback) {
-    Double value = numberOrNull(node);
-    if (value == null) {
-      return fallback;
-    }
-    return (int) Math.round(value);
-  }
-
-  private boolean boolOrDefault(JsonNode node, boolean fallback) {
-    if (node == null || node.isNull() || node.isMissingNode()) {
-      return fallback;
-    }
-
-    if (node.isBoolean()) {
-      return node.booleanValue();
-    }
-
-    if (node.isTextual()) {
-      String normalized = trimToEmpty(node.asText()).toLowerCase(Locale.ROOT);
-      if ("true".equals(normalized) || "1".equals(normalized) || "yes".equals(normalized)) {
-        return true;
-      }
-      if ("false".equals(normalized) || "0".equals(normalized) || "no".equals(normalized)) {
-        return false;
-      }
-      return fallback;
-    }
-
-    if (node.isNumber()) {
-      return node.doubleValue() != 0;
-    }
-
-    return fallback;
-  }
-
   private double numberOrDefault(String value, double fallback) {
     try {
       return Double.parseDouble(value);
     } catch (Exception ignored) {
       return fallback;
     }
-  }
-
-  private double round2(double value) {
-    return Math.round(value * 100.0) / 100.0;
-  }
-
-  private double round4(double value) {
-    return Math.round(value * 10000.0) / 10000.0;
   }
 
   private double roundUsd(double value) {
@@ -1148,9 +967,6 @@ public class DigitalOceanService {
   }
 
   private record DirectCredits(String key, double value) {
-  }
-
-  private record SizeCache(List<SizeOption> value, long expiresAt) {
   }
 
   private record SizeOption(
