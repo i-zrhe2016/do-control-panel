@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -48,6 +49,18 @@ public class ApiController {
 
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("credits", service.getAvailableCredits());
+    return body;
+  }
+
+  @GetMapping("/sizes/popular")
+  public Map<String, Object> popularSizes(
+      @RequestParam(value = "q", required = false) String query,
+      @RequestParam(value = "region", required = false) String region
+  ) {
+    requireConfigured();
+
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("sizes", service.listPopularSizes(query, region));
     return body;
   }
 

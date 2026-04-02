@@ -1,4 +1,7 @@
 const createForm = document.getElementById('createForm');
+const createRegionEl = document.getElementById('createRegion');
+const createSizeQueryEl = document.getElementById('createSizeQuery');
+const createSizeEl = document.getElementById('createSize');
 const tableBody = document.getElementById('dropletTableBody');
 const statusEl = document.getElementById('status');
 const refreshBtn = document.getElementById('refreshBtn');
@@ -12,9 +15,11 @@ const statCreditsSub = document.getElementById('statCreditsSub');
 const statCreditsMeta = document.getElementById('statCreditsMeta');
 const ALL_TAG_FILTER = '__all__';
 const CREDITS_POLL_MS = 15_000;
+const SIZE_SEARCH_DEBOUNCE_MS = 250;
 let allDroplets = [];
 let creditsPollTimer = null;
 let creditsLoading = false;
+let sizeSearchTimer = null;
 
 function setStatus(message, type = 'ok') {
   statusEl.textContent = message;
@@ -82,6 +87,97 @@ function formatDateTime(value) {
     second: '2-digit',
     hour12: false,
   }).format(date);
+}
+
+function toNumberOrNull(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function formatSizeLabel(size) {
+  const slug = String(size?.slug || '');
+  const vcpus = toNumberOrNull(size?.vcpus);
+  const memoryGb = toNumberOrNull(size?.memoryGb);
+  const diskGb = toNumberOrNull(size?.diskGb);
+  const transferTb = toNumberOrNull(size?.transferTb);
+  const monthlyUsd = toNumberOrNull(size?.monthlyUsd);
+
+  const parts = [];
+  if (vcpus !== null && memoryGb !== null) {
+    parts.push(`${vcpus} vCPU / ${memoryGb}GB`);
+  }
+  if (diskGb !== null) {
+    parts.push(`${diskGb}GB SSD`);
+  }
+  if (transferTb !== null) {
+    parts.push(`${transferTb}TB transfer`);
+  }
+  if (monthlyUsd !== null) {
+    parts.push(`$${monthlyUsd}/mo`);
+  }
+
+  return [slug, ...parts].filter(Boolean).join(' · ');
+}
+
+function renderSizeOptions(sizes, preferred = '') {
+  const selected = preferred || createSizeEl.value;
+  const safeSizes = Array.isArray(sizes) ? sizes : [];
+
+  createSizeEl.innerHTML = '';
+  if (!safeSizes.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = '没有匹配型号';
+    createSizeEl.append(option);
+    createSizeEl.disabled = true;
+    return;
+  }
+
+  for (const size of safeSizes) {
+    const option = document.createElement('option');
+    option.value = String(size.slug || '');
+    option.textContent = formatSizeLabel(size);
+    createSizeEl.append(option);
+  }
+
+  createSizeEl.disabled = false;
+  if (selected && safeSizes.some((item) => String(item.slug || '') === selected)) {
+    createSizeEl.value = selected;
+    return;
+  }
+
+  const recommended = safeSizes.find((item) => Boolean(item.recommended));
+  createSizeEl.value = String(recommended?.slug || safeSizes[0].slug || '');
+}
+
+async function loadPopularSizes(query = '') {
+  const q = String(query || '').trim();
+  const params = new URLSearchParams();
+  const region = createRegionEl.value.trim();
+  if (q) {
+    params.set('q', q);
+  }
+  if (region) {
+    params.set('region', region);
+  }
+  const url = params.size > 0 ? `/api/sizes/popular?${params.toString()}` : '/api/sizes/popular';
+  const current = createSizeEl.value;
+  const data = await fetchJson(url);
+  renderSizeOptions(data.sizes || [], current);
+}
+
+function schedulePopularSizeSearch() {
+  if (sizeSearchTimer) {
+    window.clearTimeout(sizeSearchTimer);
+  }
+
+  sizeSearchTimer = window.setTimeout(async () => {
+    try {
+      await loadPopularSizes(createSizeQueryEl.value);
+    } catch (err) {
+      setStatus(`热门型号加载失败: ${err.message}`, 'error');
+    }
+  }, SIZE_SEARCH_DEBOUNCE_MS);
 }
 
 function renderCredits(credits, options = {}) {
@@ -293,12 +389,18 @@ function startCreditsPolling() {
 createForm.addEventListener('submit', async (event) => {
   event.preventDefault();
 
-  const region = document.getElementById('createRegion').value.trim();
+  const region = createRegionEl.value.trim();
   const name = document.getElementById('createName').value.trim();
   const tags = parseTagsInput(document.getElementById('createTags').value);
+  const size = createSizeEl.value.trim();
 
   if (!name) {
     setStatus('创建失败: 名称不能为空', 'error');
+    return;
+  }
+
+  if (!size) {
+    setStatus('创建失败: 请选择一个型号', 'error');
     return;
   }
 
@@ -310,11 +412,14 @@ createForm.addEventListener('submit', async (event) => {
       body: JSON.stringify({
         region,
         name,
+        size,
         ...(tags.length > 0 ? { tags } : {}),
       }),
     });
 
     createForm.reset();
+    createSizeQueryEl.value = '';
+    await loadPopularSizes();
     setStatus('创建请求已提交');
     await loadDroplets();
   } catch (err) {
@@ -334,6 +439,16 @@ tagFilterEl.addEventListener('change', () => {
     return;
   }
   setStatus(`已筛选标签 ${selectedTag}，共 ${filteredDroplets.length} 台`);
+});
+
+createSizeQueryEl.addEventListener('input', () => {
+  schedulePopularSizeSearch();
+});
+
+createRegionEl.addEventListener('change', () => {
+  loadPopularSizes(createSizeQueryEl.value).catch((err) => {
+    setStatus(`热门型号加载失败: ${err.message}`, 'error');
+  });
 });
 
 deleteByTagBtn.addEventListener('click', async () => {
@@ -458,5 +573,8 @@ tableBody.addEventListener('click', async (event) => {
 renderTagFilter([]);
 updateDeleteByTagButton(0);
 renderCredits(null, { initial: true });
+loadPopularSizes().catch((err) => {
+  setStatus(`热门型号加载失败: ${err.message}`, 'error');
+});
 refreshAll();
 startCreditsPolling();
